@@ -1,0 +1,6 @@
+{
+  "name": "Smart Point Venture",
+  "description": "Comprehensive business management, POS, inventory, expenses, profit analytics and debt tracking system for Smart Point Venture in Dar es Salaam, Tanzania.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
