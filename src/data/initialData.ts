@@ -26,6 +26,8 @@ export const initialSettings: BusinessSettings = {
   receiptFooter: 'Thank you for shopping with SMART POINT VENTURE.',
   receiptFooterSwahili: 'Asante sana kwa kufanya manunuzi na SMART POINT VENTURE. Karibu tena!',
   autoBackupDays: 1,
+  requireAdminSaleApproval: true,
+  notificationEmail: 'colimbajr@gmail.com',
 };
 
 export const initialUsers: User[] = [

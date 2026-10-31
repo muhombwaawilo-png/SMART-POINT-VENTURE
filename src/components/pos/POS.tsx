@@ -27,7 +27,9 @@ import {
   AlertCircle,
   Clock,
   Sparkles,
+  Mail,
 } from 'lucide-react';
+import { sendGmailEmail, getGmailAccessToken } from '../../services/gmail';
 
 export const POS: React.FC = () => {
   const {
@@ -286,6 +288,82 @@ export const POS: React.FC = () => {
   // Receipt print
   const handlePrint = () => {
     window.print();
+  };
+
+  const [isEmailingReceipt, setIsEmailingReceipt] = useState(false);
+
+  const handleEmailReceipt = async () => {
+    if (!completedSale) return;
+    const token = getGmailAccessToken();
+    if (!token) {
+      alert('Hujaunganisha Gmail. Tafadhali fungua Gmail Hub na ubonyeze "Sign in with Google" kwanza.');
+      return;
+    }
+
+    const customerEmail = window.prompt(
+      'Weka barua pepe (email) ya mteja au unakotaka kutuma risiti hii:',
+      settings.notificationEmail || ''
+    );
+    if (!customerEmail || !customerEmail.includes('@')) {
+      if (customerEmail !== null) alert('Tafadhali weka email sahihi!');
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Unathibitisha kutuma risiti #${completedSale.receiptNumber} ya ${formatTZS(completedSale.totalAmount)} kwenda kwa: ${customerEmail}?`
+    );
+    if (!confirmed) return;
+
+    setIsEmailingReceipt(true);
+    try {
+      const itemsHtml = completedSale.items
+        .map(
+          it => `
+          <tr>
+            <td style="padding: 6px 0; border-bottom: 1px solid #f1f5f9;">${it.productName} (${it.quantity} ${it.unit})</td>
+            <td style="padding: 6px 0; text-align: right; border-bottom: 1px solid #f1f5f9; font-weight: bold;">${formatTZS(it.totalPrice)}</td>
+          </tr>`
+        )
+        .join('');
+
+      const html = `
+        <div style="font-family: Arial, sans-serif; max-width: 420px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px;">
+          <div style="text-align: center; border-bottom: 2px dashed #cbd5e1; padding-bottom: 12px;">
+            <h2 style="margin: 0; color: #065f46;">${settings.name}</h2>
+            <p style="margin: 2px 0; font-size: 11px; color: #64748b;">${settings.location}</p>
+            <p style="margin: 2px 0; font-size: 11px; color: #64748b;">Tel: ${settings.phone1} / ${settings.phone2}</p>
+          </div>
+          <div style="padding: 10px 0; font-size: 12px; border-bottom: 1px dashed #cbd5e1;">
+            <p style="margin: 3px 0;"><strong>Risiti:</strong> #${completedSale.receiptNumber}</p>
+            <p style="margin: 3px 0;"><strong>Tarehe:</strong> ${completedSale.date} ${completedSale.time}</p>
+            <p style="margin: 3px 0;"><strong>Mhudumu:</strong> ${completedSale.employeeName}</p>
+            <p style="margin: 3px 0;"><strong>Njia ya Malipo:</strong> ${completedSale.paymentMethod.toUpperCase()}</p>
+          </div>
+          <table style="width: 100%; font-size: 12px; border-collapse: collapse; margin-top: 10px;">
+            ${itemsHtml}
+          </table>
+          <div style="font-size: 14px; font-weight: bold; text-align: right; margin-top: 14px; padding-top: 8px; border-top: 2px solid #0f172a; color: #047857;">
+            JUMLA KUU: ${formatTZS(completedSale.totalAmount)}
+          </div>
+          <p style="text-align: center; font-size: 11px; margin-top: 18px; color: #64748b;">
+            ${settings.receiptFooterSwahili}
+          </p>
+        </div>
+      `;
+
+      await sendGmailEmail({
+        to: customerEmail,
+        subject: `Risiti #${completedSale.receiptNumber} — SMART POINT VENTURE`,
+        bodyHtml: html,
+        bodyText: `Risiti #${completedSale.receiptNumber} kutoka SMART POINT VENTURE. Jumla: ${formatTZS(completedSale.totalAmount)}`,
+      });
+
+      alert(`Risiti imetumwa kikamilifu kwenda kwa: ${customerEmail}`);
+    } catch (err: any) {
+      alert(`Hitilafu ya Gmail: ${err.message}`);
+    } finally {
+      setIsEmailingReceipt(false);
+    }
   };
 
   return (
@@ -911,7 +989,7 @@ export const POS: React.FC = () => {
             </div>
 
             {/* Modal Actions */}
-            <div className="p-3 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 flex items-center justify-between gap-2">
+            <div className="p-3 border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 flex flex-wrap items-center justify-between gap-2">
               <button
                 type="button"
                 onClick={() => setShowReceiptModal(false)}
@@ -919,14 +997,28 @@ export const POS: React.FC = () => {
               >
                 Funga
               </button>
-              <button
-                type="button"
-                onClick={handlePrint}
-                className="px-4 py-2 text-xs font-bold rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-1.5 shadow"
-              >
-                <Printer className="h-3.5 w-3.5" />
-                <span>{t.printReceipt}</span>
-              </button>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleEmailReceipt}
+                  disabled={isEmailingReceipt}
+                  className="px-3 py-2 text-xs font-bold rounded-xl bg-purple-600 hover:bg-purple-500 text-white flex items-center gap-1.5 shadow transition cursor-pointer disabled:opacity-50"
+                  title="Tuma risiti hii kwa barua pepe kupitia Gmail"
+                >
+                  <Mail className="h-3.5 w-3.5" />
+                  <span>{isEmailingReceipt ? 'Inatuma...' : 'Tuma kwa Gmail'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handlePrint}
+                  className="px-4 py-2 text-xs font-bold rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white flex items-center gap-1.5 shadow transition cursor-pointer"
+                >
+                  <Printer className="h-3.5 w-3.5" />
+                  <span>{t.printReceipt}</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>

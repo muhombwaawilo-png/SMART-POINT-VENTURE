@@ -132,7 +132,13 @@ export interface Sale {
   isCredit: boolean;
   creditPaid: number;
   creditDue?: string;
-  status: 'completed' | 'cancelled';
+  status: 'completed' | 'cancelled' | 'pending_approval';
+  approvalStatus?: 'approved' | 'pending' | 'rejected';
+  approvedBy?: string;
+  approvedAt?: string;
+  rejectedBy?: string;
+  rejectedAt?: string;
+  rejectionReason?: string;
   cancellationReason?: string;
   cancelledBy?: string;
   cancelledAt?: string;
@@ -316,4 +322,6 @@ export interface BusinessSettings {
   receiptFooter: string;
   receiptFooterSwahili: string;
   autoBackupDays: number;
+  requireAdminSaleApproval?: boolean;
+  notificationEmail?: string;
 }

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useStore } from '../../context/StoreContext';
 import {
   Store,
@@ -16,7 +16,11 @@ import {
   Info,
   Sun,
   Moon,
+  CheckCircle2,
+  Trash2,
 } from 'lucide-react';
+
+const ADMIN_DEVICE_STORAGE_KEY = 'spv_admin_device_credentials';
 
 export const LoginPortal: React.FC = () => {
   const { login, users, settings, language, setLanguage, theme, setTheme, t } = useStore();
@@ -28,25 +32,71 @@ export const LoginPortal: React.FC = () => {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
+  // Device-saving credentials states
+  const [rememberDevice, setRememberDevice] = useState<boolean>(() => {
+    return localStorage.getItem(ADMIN_DEVICE_STORAGE_KEY) !== null;
+  });
+  const [hasSavedDeviceCredentials, setHasSavedDeviceCredentials] = useState<boolean>(() => {
+    return localStorage.getItem(ADMIN_DEVICE_STORAGE_KEY) !== null;
+  });
+
   // Filter staff members to help staff identify their EMP numbers
   const staffMembers = users.filter(u => u.role !== 'super_admin');
   const superAdmin = users.find(u => u.role === 'super_admin');
+
+  // Load remembered admin credentials if present on this specific device
+  useEffect(() => {
+    const saved = localStorage.getItem(ADMIN_DEVICE_STORAGE_KEY);
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (parsed.identifier && parsed.password) {
+          setIdentifier(parsed.identifier);
+          setPassword(parsed.password);
+          setRememberDevice(true);
+          setHasSavedDeviceCredentials(true);
+        }
+      } catch (err) {
+        console.error('Failed to parse saved device credentials:', err);
+      }
+    }
+  }, []);
 
   const handlePortalSwitch = (portal: 'admin' | 'staff') => {
     setActivePortal(portal);
     setErrorMessage(null);
     if (portal === 'admin') {
-      setIdentifier('awilo');
-      setPassword('awilo123');
-    } else {
-      if (staffMembers.length > 0) {
-        setIdentifier(staffMembers[0].employeeNumber || '1001');
-        setPassword(staffMembers[0].password || '1234');
+      const saved = localStorage.getItem(ADMIN_DEVICE_STORAGE_KEY);
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          setIdentifier(parsed.identifier || '');
+          setPassword(parsed.password || '');
+          setHasSavedDeviceCredentials(true);
+          setRememberDevice(true);
+        } catch {
+          setIdentifier('');
+          setPassword('');
+          setHasSavedDeviceCredentials(false);
+        }
       } else {
+        // Never put hardcoded credentials on clean devices!
         setIdentifier('');
         setPassword('');
+        setHasSavedDeviceCredentials(false);
       }
+    } else {
+      setIdentifier('');
+      setPassword('');
     }
+  };
+
+  const handleClearSavedDevice = () => {
+    localStorage.removeItem(ADMIN_DEVICE_STORAGE_KEY);
+    setIdentifier('');
+    setPassword('');
+    setRememberDevice(false);
+    setHasSavedDeviceCredentials(false);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -80,24 +130,27 @@ export const LoginPortal: React.FC = () => {
     setTimeout(() => {
       const res = login(activePortal, identifier, password);
       setIsLoading(false);
-      if (!res.success) {
+      if (res.success) {
+        if (activePortal === 'admin') {
+          if (rememberDevice) {
+            localStorage.setItem(
+              ADMIN_DEVICE_STORAGE_KEY,
+              JSON.stringify({
+                identifier: identifier.trim(),
+                password: password.trim(),
+                savedAt: new Date().toISOString(),
+              })
+            );
+            setHasSavedDeviceCredentials(true);
+          } else {
+            localStorage.removeItem(ADMIN_DEVICE_STORAGE_KEY);
+            setHasSavedDeviceCredentials(false);
+          }
+        }
+      } else {
         setErrorMessage(res.message || (language === 'sw' ? 'Taarifa za kuingia si sahihi.' : 'Invalid credentials.'));
       }
     }, 250);
-  };
-
-  const fillAdminCredentials = () => {
-    setActivePortal('admin');
-    setIdentifier('awilo');
-    setPassword('awilo123');
-    setErrorMessage(null);
-  };
-
-  const fillStaffCredentials = (empNo: string, empPass: string) => {
-    setActivePortal('staff');
-    setIdentifier(empNo);
-    setPassword(empPass);
-    setErrorMessage(null);
   };
 
   return (
@@ -297,6 +350,48 @@ export const LoginPortal: React.FC = () => {
               </div>
             </div>
 
+            {/* Remember Me on This Device (Only for Admin to protect credentials from public display) */}
+            {activePortal === 'admin' && (
+              <div className="space-y-2 pt-1 pb-1">
+                <label className="flex items-start gap-2.5 cursor-pointer select-none group">
+                  <input
+                    type="checkbox"
+                    checked={rememberDevice}
+                    onChange={e => setRememberDevice(e.target.checked)}
+                    className="mt-0.5 h-4 w-4 rounded border-slate-700 bg-slate-950 text-emerald-500 focus:ring-emerald-500/20 cursor-pointer accent-emerald-500"
+                  />
+                  <div className="text-xs">
+                    <span className="font-semibold text-slate-200 group-hover:text-white transition">
+                      {language === 'sw' ? 'Hifadhi taarifa zangu kwenye kifaa hiki' : 'Remember me on this device'}
+                    </span>
+                    <p className="text-[10px] text-slate-400 mt-0.5 leading-relaxed">
+                      {language === 'sw'
+                        ? 'Zitahifadhiwa kwenye kivinjari cha simu/kompyuta hii tu bila kuonekana hadharani kwenye skrini kuu.'
+                        : 'Credentials will be stored privately on this browser only without being exposed publicly.'}
+                    </p>
+                  </div>
+                </label>
+
+                {hasSavedDeviceCredentials && (
+                  <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-emerald-950/40 border border-emerald-800/50 text-[11px] text-emerald-300">
+                    <span className="flex items-center gap-1.5 font-medium">
+                      <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+                      {language === 'sw' ? 'Kifaa hiki kimehifadhi taarifa za Super Admin' : 'Saved on this device'}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleClearSavedDevice}
+                      className="inline-flex items-center gap-1 text-[10px] font-bold text-rose-300 hover:text-rose-200 transition cursor-pointer hover:underline"
+                      title="Futa taarifa zilizohifadhiwa kwenye kifaa hiki"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                      <span>{language === 'sw' ? 'Futa kwenye kifaa' : 'Clear'}</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
             <button
               type="submit"
               disabled={isLoading}
@@ -317,34 +412,23 @@ export const LoginPortal: React.FC = () => {
             </button>
           </form>
 
-          {/* Helper Credentials Box */}
+          {/* Secure Information Box - Super Admin credentials are NEVER exposed here */}
           <div className="mt-6 pt-5 border-t border-slate-800 space-y-3">
-            <div className="flex items-center gap-1.5 text-[11px] font-bold text-slate-400">
-              <Info className="h-3.5 w-3.5 text-emerald-400" />
-              <span>Taarifa za Kuingilia kwa Urahisi:</span>
-            </div>
-
             {activePortal === 'admin' ? (
-              <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800 text-[11px] text-slate-300 space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-400">Mkurugenzi:</span>
-                  <span className="font-bold text-white">AWILO SULEIMAN</span>
+              <div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800 text-[11px] text-slate-300 space-y-2">
+                <div className="flex items-center gap-2 text-emerald-400 font-bold">
+                  <ShieldCheck className="h-4 w-4" />
+                  <span>{language === 'sw' ? 'Faragha na Ulinzi wa Super Admin' : 'Super Admin Privacy & Security'}</span>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-400">Username / Simu:</span>
-                  <span className="font-mono text-emerald-400 font-bold">awilo</span> au <span className="font-mono text-emerald-400 font-bold">0654275518</span>
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  {language === 'sw'
+                    ? 'Taarifa za kuingilia za Super Admin (Awilo Suleiman) hazionyeshwi hadharani kwenye skrini hii kwa ajili ya usalama wa duka. Mara unapoingia, unaweza kuchagua "Hifadhi taarifa zangu kwenye kifaa hiki" ili simu au kompyuta yako izikumbuke kiotomatiki.'
+                    : 'Super Admin credentials are confidential and hidden from the public login screen. Check "Remember me on this device" so your browser saves them securely.'}
+                </p>
+                <div className="flex flex-wrap items-center justify-between pt-1 border-t border-slate-800/80 text-[10px] text-slate-400">
+                  <span className="text-slate-400">Mkurugenzi: AWILO SULEIMAN</span>
+                  <span className="text-emerald-400 font-medium">Smart Point Venture</span>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-400">Nenosiri (Password):</span>
-                  <span className="font-mono text-amber-400 font-bold">awilo123</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={fillAdminCredentials}
-                  className="w-full mt-2 py-1 text-[10px] font-bold rounded-lg bg-emerald-950/80 text-emerald-300 hover:bg-emerald-900/80 border border-emerald-800 transition"
-                >
-                  Tumia Taarifa za Super Admin moja kwa moja
-                </button>
               </div>
             ) : (
               <div className="space-y-2">
@@ -356,29 +440,40 @@ export const LoginPortal: React.FC = () => {
                     </p>
                   </div>
                 ) : (
-                  <div className="space-y-1.5">
+                  <div className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 space-y-2">
+                    <div className="flex items-center gap-2 text-teal-400 font-bold text-xs">
+                      <FileSpreadsheet className="h-4 w-4" />
+                      <span>{language === 'sw' ? 'Wafanyakazi Waliosajiliwa (Namba za Kazi)' : 'Registered Staff Members'}</span>
+                    </div>
                     <p className="text-[10px] text-slate-400">
-                      Chagua mfanyakazi aliyepo kuingia naye kwa jaribio:
+                      {language === 'sw'
+                        ? 'Chagua Namba yako ya Kazi kisha ingiza nenosiri lako binafsi ulilopewa na Mkurugenzi:'
+                        : 'Select your Employee ID and enter your private password:'}
                     </p>
-                    <div className="max-h-36 overflow-y-auto space-y-1 pr-1">
+                    <div className="max-h-36 overflow-y-auto space-y-1.5 pr-1">
                       {staffMembers.map(emp => (
-                        <button
+                        <div
                           key={emp.id}
-                          type="button"
-                          onClick={() => fillStaffCredentials(emp.employeeNumber || '1001', emp.password || '1234')}
-                          className="w-full flex items-center justify-between p-2 rounded-lg bg-slate-950/70 hover:bg-slate-800/70 border border-slate-800 text-left transition text-[11px]"
+                          className="flex items-center justify-between p-2 rounded-lg bg-slate-900 border border-slate-800 text-[11px]"
                         >
                           <div>
                             <span className="font-bold text-white block">{emp.name}</span>
                             <span className="text-[10px] font-mono text-emerald-400 font-bold">
-                              Username (ID): {emp.employeeNumber || '1001'}
+                              Namba ya Kazi (ID): {emp.employeeNumber || '1001'}
                             </span>
                           </div>
-                          <div className="text-right">
-                            <span className="text-[10px] text-slate-400 block">Nenosiri:</span>
-                            <span className="text-[10px] font-mono text-amber-400 font-bold">{emp.password || '1234'}</span>
-                          </div>
-                        </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIdentifier(emp.employeeNumber || '1001');
+                              setPassword('');
+                              setErrorMessage(null);
+                            }}
+                            className="text-[10px] px-2.5 py-1 rounded-md bg-slate-800 hover:bg-emerald-600 hover:text-white text-slate-300 font-semibold transition cursor-pointer"
+                          >
+                            Chagua
+                          </button>
+                        </div>
                       ))}
                     </div>
                   </div>

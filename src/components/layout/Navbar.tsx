@@ -17,7 +17,9 @@ import {
   AlertTriangle,
   Package,
   DollarSign,
+  Mail,
 } from 'lucide-react';
+import { GmailHubModal } from '../gmail/GmailHubModal';
 
 export const Navbar: React.FC = () => {
   const {
@@ -43,6 +45,7 @@ export const Navbar: React.FC = () => {
   const [currentTime, setCurrentTime] = useState<string>('');
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
+  const [showGmailModal, setShowGmailModal] = useState(false);
 
   // Live Tanzanian clock
   useEffect(() => {
@@ -132,6 +135,17 @@ export const Navbar: React.FC = () => {
             >
               <Globe className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
               <span className="font-bold">{language === 'sw' ? 'SW' : 'EN'}</span>
+            </button>
+
+            {/* Gmail Hub Button */}
+            <button
+              type="button"
+              onClick={() => setShowGmailModal(true)}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold rounded-lg text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-purple-950/60 hover:bg-purple-100 dark:hover:bg-purple-900 border border-purple-200 dark:border-purple-800 transition cursor-pointer"
+              title="Fungua Gmail Hub kutuma ripoti au risiti"
+            >
+              <Mail className="h-3.5 w-3.5 text-purple-600 dark:text-purple-400" />
+              <span className="hidden sm:inline">Gmail</span>
             </button>
 
             {/* Dark Mode & White Mode Switcher */}
@@ -346,6 +360,12 @@ export const Navbar: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Gmail Hub Modal */}
+      <GmailHubModal
+        isOpen={showGmailModal}
+        onClose={() => setShowGmailModal(false)}
+      />
     </header>
   );
 };

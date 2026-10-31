@@ -12,7 +12,10 @@ import {
   Award,
   ArrowUpRight,
   ArrowDownRight,
+  Mail,
 } from 'lucide-react';
+import { PrintReportModal } from './PrintReportModal';
+import { GmailHubModal } from '../gmail/GmailHubModal';
 
 export const Reports: React.FC = () => {
   const {
@@ -28,6 +31,8 @@ export const Reports: React.FC = () => {
 
   const [activeReportTab, setActiveReportTab] = useState<'daily' | 'weekly' | 'monthly'>('weekly');
   const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [showPrintModal, setShowPrintModal] = useState(false);
+  const [showGmailModal, setShowGmailModal] = useState(false);
 
   const now = new Date();
 
@@ -227,17 +232,24 @@ export const Reports: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
-            onClick={() => window.print()}
-            className="px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs flex items-center gap-1.5 transition"
+            onClick={() => setShowPrintModal(true)}
+            className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md shadow-emerald-600/30 flex items-center gap-1.5 transition cursor-pointer"
           >
             <Printer className="h-3.5 w-3.5" />
-            <span>{t.exportPDF}</span>
+            <span>{language === 'sw' ? 'Chapisha Ripoti ya Mfanyakazi' : 'Print Staff Report'}</span>
+          </button>
+          <button
+            onClick={() => setShowGmailModal(true)}
+            className="px-3.5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs shadow-md flex items-center gap-1.5 transition cursor-pointer"
+          >
+            <Mail className="h-3.5 w-3.5" />
+            <span>Gmail Hub</span>
           </button>
           <button
             onClick={handleExportCSV}
-            className="px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md shadow-emerald-600/30 flex items-center gap-1.5 transition"
+            className="px-3.5 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold text-xs flex items-center gap-1.5 transition"
           >
             <Download className="h-3.5 w-3.5" />
             <span>{t.exportCSV}</span>
@@ -465,6 +477,19 @@ export const Reports: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* PRINT REPORT MODAL */}
+      <PrintReportModal
+        isOpen={showPrintModal}
+        onClose={() => setShowPrintModal(false)}
+        initialPeriod={activeReportTab === 'daily' ? 'today' : 'this_week'}
+      />
+
+      {/* GMAIL HUB MODAL */}
+      <GmailHubModal
+        isOpen={showGmailModal}
+        onClose={() => setShowGmailModal(false)}
+      />
     </div>
   );
 };

@@ -1,5 +1,6 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useStore } from '../../context/StoreContext';
+import { Sale } from '../../types';
 import {
   TrendingUp,
   DollarSign,
@@ -18,7 +19,21 @@ import {
   ChevronRight,
   Info,
   CheckCircle2,
+  Printer,
+  Mail,
+  Trash2,
+  Check,
+  X,
+  Eye,
+  Volume2,
+  VolumeX,
+  Radio,
+  FileText,
+  AlertCircle,
+  Smartphone,
 } from 'lucide-react';
+import { PrintReportModal } from '../reports/PrintReportModal';
+import { GmailHubModal } from '../gmail/GmailHubModal';
 
 export const Dashboard: React.FC = () => {
   const {
@@ -32,20 +47,51 @@ export const Dashboard: React.FC = () => {
     t,
     formatTZS,
     setActiveTab,
+    approveSale,
+    deleteSale,
+    deleteSaleItem,
+    isLiveChimeEnabled,
+    setIsLiveChimeEnabled,
+    playSaleChime,
   } = useStore();
+
+  const isSuperAdmin = currentUser.role === 'super_admin';
+
+  // Modals
+  const [showPrintModal, setShowPrintModal] = useState(false);
+  const [printModalPeriod, setPrintModalPeriod] = useState<'today' | 'this_week' | 'custom'>('today');
+  const [showGmailModal, setShowGmailModal] = useState(false);
+
+  // Void/Delete sale modal state
+  const [deletingSale, setDeletingSale] = useState<Sale | null>(null);
+  const [deleteReason, setDeleteReason] = useState('Ilirekodiwa kimakosa na muuzaji');
+
+  // Inspect / Line item deletion modal state
+  const [inspectingSale, setInspectingSale] = useState<Sale | null>(null);
+  const [itemDeleteReason, setItemDeleteReason] = useState('Bidhaa iliwekwa kimakosa');
 
   const todayStr = new Date().toISOString().split('T')[0];
 
   // Helper date calculations
   const now = new Date();
   const startOfWeek = new Date(now);
-  const day = startOfWeek.getDay() || 7; // get current day of week (1 is Mon, 7 is Sun)
-  startOfWeek.setDate(startOfWeek.getDate() - day + 1); // Set to Monday
+  const day = startOfWeek.getDay() || 7;
+  startOfWeek.setDate(startOfWeek.getDate() - day + 1);
   const startOfWeekStr = startOfWeek.toISOString().split('T')[0];
 
   const currentYear = now.getFullYear();
   const currentMonth = String(now.getMonth() + 1).padStart(2, '0');
   const currentMonthPrefix = `${currentYear}-${currentMonth}`;
+
+  // Pending staff sales queue
+  const pendingSales = useMemo(() => {
+    return sales.filter(s => s.status === 'pending_approval');
+  }, [sales]);
+
+  // Recent 10 sales
+  const recentSales = useMemo(() => {
+    return sales.slice(0, 10);
+  }, [sales]);
 
   // Metrics computation
   const metrics = useMemo(() => {
@@ -197,6 +243,54 @@ export const Dashboard: React.FC = () => {
     }
   );
 
+  // Confirm void/deletion of mistaken sale
+  const handleConfirmDeleteSale = () => {
+    if (!deletingSale) return;
+    if (!deleteReason.trim()) {
+      alert('Tafadhali andika sababu ya kufuta mauzo haya.');
+      return;
+    }
+
+    const success = deleteSale(deletingSale.id, deleteReason);
+    if (success) {
+      setDeletingSale(null);
+      setDeleteReason('Ilirekodiwa kimakosa na muuzaji');
+      if (inspectingSale?.id === deletingSale.id) {
+        setInspectingSale(null);
+      }
+    }
+  };
+
+  // Delete line item inside inspecting sale
+  const handleDeleteLineItem = (index: number) => {
+    if (!inspectingSale) return;
+    const item = inspectingSale.items[index];
+    const confirmed = window.confirm(
+      `Je, una uhakika wa kufuta "${item.productName}" (${item.quantity} ${item.unit}) kwenye risiti hii? Mzigo utarudishwa stoo mara moja.`
+    );
+    if (!confirmed) return;
+
+    deleteSaleItem(inspectingSale.id, index, itemDeleteReason);
+    // Refresh inspected sale from latest sales list
+    const updated = sales.find(s => s.id === inspectingSale.id);
+    if (updated) {
+      setInspectingSale(updated);
+    } else {
+      setInspectingSale(null);
+    }
+  };
+
+  // Batch approve all pending sales
+  const handleApproveAllPending = () => {
+    if (pendingSales.length === 0) return;
+    const confirmed = window.confirm(
+      `Unathibitisha kupitisha mauzo yote ${pendingSales.length} yaliyoingizwa na muuza duka?`
+    );
+    if (!confirmed) return;
+
+    pendingSales.forEach(s => approveSale(s.id));
+  };
+
   return (
     <div className="space-y-6 pb-12">
       {/* Top Banner / Store Header */}
@@ -226,19 +320,35 @@ export const Dashboard: React.FC = () => {
 
           {/* Quick Action Buttons */}
           <div className="flex flex-wrap items-center gap-2">
+            {/* PRINT SALES REPORT BUTTON */}
+            <button
+              onClick={() => {
+                setPrintModalPeriod('today');
+                setShowPrintModal(true);
+              }}
+              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-lg transition active:scale-95 cursor-pointer border border-emerald-400/40"
+              title="Chapisha au Print ripoti ya mauzo ya siku husika au ya wiki husika kwa mfanyakazi"
+            >
+              <Printer className="h-4 w-4" />
+              <span>{language === 'sw' ? 'Chapisha Ripoti ya Mauzo' : 'Print Sales Report'}</span>
+            </button>
+
+            {/* GMAIL HUB BUTTON */}
+            <button
+              onClick={() => setShowGmailModal(true)}
+              className="flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs shadow-lg transition active:scale-95 cursor-pointer border border-purple-400/40"
+              title="Fungua Gmail Hub kutuma ripoti za biashara au risiti"
+            >
+              <Mail className="h-4 w-4" />
+              <span>Gmail Hub</span>
+            </button>
+
             <button
               onClick={() => setActiveTab('pos')}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs shadow-lg transition active:scale-95"
+              className="flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white font-semibold text-xs border border-white/10 transition"
             >
               <ShoppingCart className="h-4 w-4" />
               <span>{t.navPOS}</span>
-            </button>
-            <button
-              onClick={() => setActiveTab('expenses')}
-              className="flex items-center gap-2 px-3.5 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white font-semibold text-xs border border-white/10 transition"
-            >
-              <CreditCard className="h-4 w-4" />
-              <span>{t.recordExpense}</span>
             </button>
             <button
               onClick={() => setActiveTab('closing')}
@@ -252,6 +362,178 @@ export const Dashboard: React.FC = () => {
 
         {/* Decorative corner background shimmer */}
         <div className="absolute -right-16 -bottom-16 w-64 h-64 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
+      </div>
+
+      {/* ========================================================================= */}
+      {/* 1. REAL-TIME SALES CONFIRMATION & APPROVAL QUEUE (KUDHIBITISHA PAPO KWA PAPO) */}
+      {/* ========================================================================= */}
+      <div className="bg-white dark:bg-slate-900 rounded-2xl border-2 border-emerald-500/30 dark:border-emerald-500/20 shadow-md p-5 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800 pb-3">
+          <div className="flex items-center gap-3">
+            <div className="relative">
+              <div className="h-3.5 w-3.5 rounded-full bg-emerald-500 animate-ping absolute inset-0" />
+              <div className="h-3.5 w-3.5 rounded-full bg-emerald-600 relative" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-sm font-black text-slate-900 dark:text-white uppercase tracking-wide">
+                  {language === 'sw'
+                    ? 'Uthibitishaji wa Mauzo Papo kwa Papo (Live Sales Confirmation)'
+                    : 'Live Sales Approval & Confirmation Queue'}
+                </h2>
+                {pendingSales.length > 0 && (
+                  <span className="px-2 py-0.5 rounded-full bg-amber-500 text-white text-[10px] font-black animate-pulse">
+                    {pendingSales.length} {language === 'sw' ? 'Yanasubiri Uthibitisho' : 'Pending'}
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                {language === 'sw'
+                  ? 'Muuza duka (cashier) akiingiza mauzo, taarifa zinaonekana hapa moja kwa moja ili uweze kudhibitisha au kufuta makosa.'
+                  : 'Real-time sales entries submitted by cashiers for instant Super Admin verification or deletion.'}
+              </p>
+            </div>
+          </div>
+
+          {/* Sound alert & Batch actions */}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                setIsLiveChimeEnabled(!isLiveChimeEnabled);
+                if (!isLiveChimeEnabled) playSaleChime();
+              }}
+              className={`p-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 border transition cursor-pointer ${
+                isLiveChimeEnabled
+                  ? 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300 border-emerald-200'
+                  : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400 border-slate-200'
+              }`}
+              title="Kengele ya Mauzo ya Papo kwa Papo (Audio alert)"
+            >
+              {isLiveChimeEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
+              <span className="hidden sm:inline">
+                {isLiveChimeEnabled ? 'Sauti: Imewashwa' : 'Sauti: Imezimwa'}
+              </span>
+            </button>
+
+            {pendingSales.length > 1 && (
+              <button
+                onClick={handleApproveAllPending}
+                className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow transition flex items-center gap-1 cursor-pointer"
+              >
+                <Check className="h-3.5 w-3.5" />
+                <span>Thibitisha Yote ({pendingSales.length})</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Pending Queue List */}
+        {pendingSales.length === 0 ? (
+          <div className="py-6 px-4 rounded-xl bg-slate-50 dark:bg-slate-800/40 border border-dashed border-slate-200 dark:border-slate-800 text-center flex flex-col items-center justify-center gap-2">
+            <div className="p-2.5 rounded-full bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400">
+              <CheckCircle2 className="h-5 w-5" />
+            </div>
+            <div className="text-xs font-bold text-slate-800 dark:text-slate-200">
+              {language === 'sw'
+                ? 'Hakuna mauzo yanayosubiri uthibitisho kwa sasa.'
+                : 'No pending transactions awaiting approval.'}
+            </div>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 max-w-md">
+              {language === 'sw'
+                ? 'Wafanyakazi wakiingiza mauzo kwenye mashine ya mauzo (POS) au Daftari la Excel, yataonekana hapa hapo kwa papo kwa uthibitisho wako.'
+                : 'Transactions submitted by staff in POS or Excel ledger will arrive here live for instant approval.'}
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {pendingSales.map(sale => (
+              <div
+                key={sale.id}
+                className="p-4 rounded-xl border-2 border-amber-300 dark:border-amber-700/60 bg-amber-50/50 dark:bg-amber-950/20 shadow-sm flex flex-col justify-between gap-3 transition hover:shadow-md"
+              >
+                <div>
+                  <div className="flex items-center justify-between text-xs pb-2 border-b border-amber-200/60 dark:border-amber-800/40">
+                    <span className="font-mono font-bold text-slate-800 dark:text-slate-200">
+                      Risiti #{sale.receiptNumber}
+                    </span>
+                    <span className="text-[11px] font-mono text-slate-500 dark:text-slate-400">
+                      {sale.time}
+                    </span>
+                  </div>
+
+                  <div className="mt-2.5 space-y-1 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500 dark:text-slate-400">Muuzaji (Staff):</span>
+                      <span className="font-bold text-slate-900 dark:text-white">
+                        {sale.employeeName}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500 dark:text-slate-400">Njia ya Malipo:</span>
+                      <span className="font-semibold uppercase text-slate-700 dark:text-slate-300">
+                        {sale.paymentMethod}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-1">
+                      <span className="text-slate-500 dark:text-slate-400">Jumla ya Mauzo:</span>
+                      <span className="text-sm font-black text-emerald-700 dark:text-emerald-400">
+                        {formatTZS(sale.totalAmount)}
+                      </span>
+                    </div>
+
+                    {/* Products summary */}
+                    <div className="mt-2 p-2 rounded-lg bg-white/70 dark:bg-slate-900/60 border border-amber-200/60 dark:border-amber-900/40 text-[11px] text-slate-700 dark:text-slate-300 max-h-20 overflow-y-auto">
+                      {sale.items.map((it, idx) => (
+                        <div key={idx} className="flex justify-between py-0.5">
+                          <span className="truncate pr-2 font-medium">
+                            • {it.productName} ({it.quantity} {it.unit})
+                          </span>
+                          <span className="font-mono font-bold whitespace-nowrap">
+                            {formatTZS(it.totalPrice)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Approval & Void/Delete Actions */}
+                <div className="pt-2 border-t border-amber-200/60 dark:border-amber-800/40 flex items-center gap-1.5">
+                  {/* APPROVE BUTTON */}
+                  <button
+                    onClick={() => approveSale(sale.id)}
+                    className="flex-1 py-1.5 px-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold text-xs shadow transition flex items-center justify-center gap-1 cursor-pointer"
+                    title="Thibitisha mauzo haya hapo kwa papo"
+                  >
+                    <Check className="h-3.5 w-3.5" />
+                    <span>Thibitisha</span>
+                  </button>
+
+                  {/* INSPECT DETAILS BUTTON */}
+                  <button
+                    onClick={() => setInspectingSale(sale)}
+                    className="py-1.5 px-2.5 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg text-xs font-semibold transition"
+                    title="Tazama bidhaa zilizomo au futa bidhaa iliyoingizwa kimakosa"
+                  >
+                    <Eye className="h-3.5 w-3.5" />
+                  </button>
+
+                  {/* VOID / DELETE MISTAKE BUTTON */}
+                  <button
+                    onClick={() => setDeletingSale(sale)}
+                    className="py-1.5 px-2.5 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/60 dark:hover:bg-rose-900 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 rounded-lg text-xs font-bold transition flex items-center gap-1"
+                    title="Futa mauzo haya iwapo muuzaji ameyaweka kimakosa"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    <span>Futa</span>
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* SALES ≠ PROFIT Educational Alert Pill */}
@@ -301,7 +583,7 @@ export const Dashboard: React.FC = () => {
         </div>
       )}
 
-      {/* 8 Core Dashboard Cards as requested */}
+      {/* 8 Core Dashboard Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Card 1: Today's Sales */}
         <div className="bg-white dark:bg-slate-900 rounded-xl p-4 border border-slate-200 dark:border-slate-800 shadow-sm relative overflow-hidden">
@@ -354,66 +636,70 @@ export const Dashboard: React.FC = () => {
           <div className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white mt-2">
             {formatTZS(metrics.weeklySales)}
           </div>
-          <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-            {language === 'sw' ? 'Kuanzia Jumatatu wiki hii' : 'Since Monday this week'}
+          <div className="mt-2 text-xs text-slate-500 dark:text-slate-400 flex items-center justify-between">
+            <span>{language === 'sw' ? 'Faida Ghafi:' : 'Gross:'} {formatTZS(metrics.weeklyGrossProfit)}</span>
+            <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+              +{formatTZS(metrics.weeklyNetProfit)}
+            </span>
           </div>
         </div>
 
-        {/* Card 4: Weekly Profit */}
+        {/* Card 4: Monthly Sales */}
         <div className="bg-white dark:bg-slate-900 rounded-xl p-4 border border-slate-200 dark:border-slate-800 shadow-sm relative overflow-hidden">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-              4. {t.weeklyProfit} ({language === 'sw' ? 'Halisi' : 'Net'})
+              4. {t.monthlySales}
             </span>
             <div className="p-2 rounded-lg bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400">
               <DollarSign className="h-4 w-4" />
             </div>
           </div>
-          <div className="text-xl sm:text-2xl font-black text-emerald-600 dark:text-emerald-400 mt-2">
-            {formatTZS(metrics.weeklyNetProfit)}
-          </div>
-          <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-            {language === 'sw' ? 'Faida Ghafi:' : 'Gross Profit:'} {formatTZS(metrics.weeklyGrossProfit)}
-          </div>
-        </div>
-
-        {/* Card 5: Monthly Sales */}
-        <div className="bg-white dark:bg-slate-900 rounded-xl p-4 border border-slate-200 dark:border-slate-800 shadow-sm relative overflow-hidden">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-              5. {t.monthlySales}
-            </span>
-            <div className="p-2 rounded-lg bg-purple-50 dark:bg-purple-950/50 text-purple-600 dark:text-purple-400">
-              <Layers className="h-4 w-4" />
-            </div>
-          </div>
           <div className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white mt-2">
             {formatTZS(metrics.monthlySales)}
           </div>
-          <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-            {language === 'sw' ? 'Mwezi huu mzima' : 'Current full month'}
+          <div className="mt-2 text-xs text-slate-500 dark:text-slate-400 flex items-center justify-between">
+            <span>{language === 'sw' ? 'Faida Halisi:' : 'Net Profit:'}</span>
+            <span className="font-bold text-emerald-600 dark:text-emerald-400">
+              +{formatTZS(metrics.monthlyNetProfit)}
+            </span>
           </div>
         </div>
 
-        {/* Card 6: Monthly Profit */}
+        {/* Card 5: Daily Expenses */}
         <div className="bg-white dark:bg-slate-900 rounded-xl p-4 border border-slate-200 dark:border-slate-800 shadow-sm relative overflow-hidden">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-              6. {t.monthlyProfit} ({language === 'sw' ? 'Halisi' : 'Net'})
+              5. {language === 'sw' ? 'Matumizi ya Leo' : 'Today\'s Expenses'}
             </span>
-            <div className="p-2 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400">
-              <TrendingUp className="h-4 w-4" />
+            <div className="p-2 rounded-lg bg-rose-50 dark:bg-rose-950/50 text-rose-600 dark:text-rose-400">
+              <CreditCard className="h-4 w-4" />
+            </div>
+          </div>
+          <div className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white mt-2">
+            {formatTZS(metrics.todayExpenses)}
+          </div>
+          <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+            {language === 'sw' ? 'Wiki nzima:' : 'This week:'} {formatTZS(metrics.weeklyExpenses)}
+          </div>
+        </div>
+
+        {/* Card 6: Cash in Drawer */}
+        <div className="bg-white dark:bg-slate-900 rounded-xl p-4 border border-slate-200 dark:border-slate-800 shadow-sm relative overflow-hidden">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+              6. {language === 'sw' ? 'Pesa Taslimu Drooni' : 'Cash in Drawer'}
+            </span>
+            <div className="p-2 rounded-lg bg-teal-50 dark:bg-teal-950/50 text-teal-600 dark:text-teal-400">
+              <DollarSign className="h-4 w-4" />
             </div>
           </div>
           <div className="text-xl sm:text-2xl font-black text-emerald-600 dark:text-emerald-400 mt-2">
-            {formatTZS(metrics.monthlyNetProfit)}
+            {formatTZS(paymentBreakdown.methods.cash)}
           </div>
           <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-            {language === 'sw' ? 'Margin ya Faida:' : 'Profit Margin:'}{' '}
-            <span className="font-bold text-slate-800 dark:text-slate-200">
-              {metrics.monthlySales > 0
-                ? `${((metrics.monthlyNetProfit / metrics.monthlySales) * 100).toFixed(1)}%`
-                : '0%'}
+            {language === 'sw' ? 'M-Pesa / Tigo / Airtel:' : 'Mobile Money:'}{' '}
+            <span className="font-semibold text-slate-700 dark:text-slate-300">
+              {formatTZS(paymentBreakdown.methods.mpesa + paymentBreakdown.methods.airtel_money + paymentBreakdown.methods.mixx)}
             </span>
           </div>
         </div>
@@ -464,6 +750,163 @@ export const Dashboard: React.FC = () => {
             </button>
           </div>
         </div>
+      </div>
+
+      {/* ========================================================================= */}
+      {/* 2. RECENT SALES & BUTTON YA KUFUTA BIDHAA / MAUZO YA MAKOSA */}
+      {/* ========================================================================= */}
+      <div className="bg-white dark:bg-slate-900 rounded-xl p-5 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+              <span>{language === 'sw' ? 'Miamala ya Hivi Karibuni na Marekebisho' : 'Recent Transactions & Mistake Management'}</span>
+              <span className="text-[11px] font-normal text-slate-400">
+                ({sales.length} {language === 'sw' ? 'Jumla' : 'Total'})
+              </span>
+            </h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              {language === 'sw'
+                ? 'Super Admin anaweza kufuta mauzo au bidhaa zilizowekwa kimakosa na muuzaji, na kurudisha mzigo stoo.'
+                : 'Super Admin can void and delete mistaken sales, restoring inventory and debt balances.'}
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                setPrintModalPeriod('today');
+                setShowPrintModal(true);
+              }}
+              className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 text-xs font-semibold flex items-center gap-1.5"
+            >
+              <Printer className="h-3.5 w-3.5" />
+              <span>{language === 'sw' ? 'Chapisha ya Leo' : 'Print Today'}</span>
+            </button>
+            <button
+              onClick={() => {
+                setPrintModalPeriod('this_week');
+                setShowPrintModal(true);
+              }}
+              className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 text-xs font-semibold flex items-center gap-1.5"
+            >
+              <Printer className="h-3.5 w-3.5" />
+              <span>{language === 'sw' ? 'Chapisha ya Wiki' : 'Print Week'}</span>
+            </button>
+          </div>
+        </div>
+
+        {recentSales.length === 0 ? (
+          <div className="py-8 text-center text-xs text-slate-400">
+            Hakuna miamala ya mauzo bado. Anza kurekodi mauzo kupitia POS au Daftari la Excel.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-50 dark:bg-slate-800/50 text-slate-500 dark:text-slate-400 font-semibold border-b border-slate-200 dark:border-slate-800">
+                <tr>
+                  <th className="py-2.5 px-3">Risiti</th>
+                  <th className="py-2.5 px-3">Muda</th>
+                  <th className="py-2.5 px-3">Muuzaji (Cashier)</th>
+                  <th className="py-2.5 px-3">Bidhaa Zilizomo</th>
+                  <th className="py-2.5 px-3">Malipo</th>
+                  <th className="py-2.5 px-3 text-right">Kiasi</th>
+                  <th className="py-2.5 px-3 text-center">Hali</th>
+                  <th className="py-2.5 px-3 text-right">Vitendo (Actions)</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800 font-medium">
+                {recentSales.map(s => {
+                  const isPending = s.status === 'pending_approval';
+                  const isCancelled = s.status === 'cancelled';
+
+                  return (
+                    <tr
+                      key={s.id}
+                      className={`hover:bg-slate-50/60 dark:hover:bg-slate-800/30 transition ${
+                        isPending ? 'bg-amber-50/40 dark:bg-amber-950/20' : ''
+                      }`}
+                    >
+                      <td className="py-2.5 px-3 font-mono font-bold text-slate-900 dark:text-white">
+                        {s.receiptNumber}
+                      </td>
+                      <td className="py-2.5 px-3 text-slate-500 font-mono">
+                        {s.date} {s.time.slice(0, 5)}
+                      </td>
+                      <td className="py-2.5 px-3">
+                        <span className="font-semibold text-slate-800 dark:text-slate-200 block">
+                          {s.employeeName}
+                        </span>
+                        <span className="text-[10px] text-slate-400 font-mono uppercase">
+                          {s.employeeRole}
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-3 text-slate-600 dark:text-slate-300 max-w-xs truncate">
+                        {s.items.map(it => `${it.productName} (${it.quantity})`).join(', ')}
+                      </td>
+                      <td className="py-2.5 px-3 uppercase text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                        {s.paymentMethod}
+                      </td>
+                      <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-900 dark:text-white">
+                        {formatTZS(s.totalAmount)}
+                      </td>
+                      <td className="py-2.5 px-3 text-center">
+                        {isPending ? (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
+                            Inasubiri Uthibitisho
+                          </span>
+                        ) : isCancelled ? (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300">
+                            Imefutwa
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300">
+                            Imethibitishwa
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-2.5 px-3 text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          {/* If pending, show Approve button */}
+                          {isPending && (
+                            <button
+                              onClick={() => approveSale(s.id)}
+                              className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                              title="Thibitisha mauzo haya"
+                            >
+                              <Check className="h-3 w-3" />
+                              <span>Thibitisha</span>
+                            </button>
+                          )}
+
+                          {/* View & Edit individual items button */}
+                          <button
+                            onClick={() => setInspectingSale(s)}
+                            className="p-1 rounded text-slate-500 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+                            title="Tazama bidhaa zilizomo au futa bidhaa ya makosa"
+                          >
+                            <Eye className="h-3.5 w-3.5" />
+                          </button>
+
+                          {/* BUTTON YA KUFUTA BIDHAA ZILIZOWEKWA KIMAKOSA NA MUUZAJI */}
+                          {!isCancelled && isSuperAdmin && (
+                            <button
+                              onClick={() => setDeletingSale(s)}
+                              className="px-2 py-1 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/60 dark:hover:bg-rose-900 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 rounded text-[11px] font-bold flex items-center gap-1 transition cursor-pointer"
+                              title="Futa muamala huu uliowekwa kimakosa na muuzaji"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                              <span>Futa Makosa</span>
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* Main Charts & Analytics Grid */}
@@ -681,6 +1124,194 @@ export const Dashboard: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* ========================================================================= */}
+      {/* MODAL: DELETE MISTAKEN SALE CONFIRMATION */}
+      {/* ========================================================================= */}
+      {deletingSale && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-rose-200 dark:border-rose-900 shadow-2xl w-full max-w-md p-6 space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-rose-100 dark:bg-rose-950/60 rounded-full text-rose-600 dark:text-rose-400">
+                <AlertTriangle className="h-6 w-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                  Futa Mauzo Yaliyowekwa Kimakosa
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Risiti #{deletingSale.receiptNumber} — {deletingSale.employeeName}
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3 bg-rose-50/70 dark:bg-rose-950/30 rounded-xl border border-rose-200 dark:border-rose-900 text-xs space-y-2 text-rose-900 dark:text-rose-200">
+              <div className="flex justify-between font-bold">
+                <span>Kiasi cha Mauzo:</span>
+                <span className="font-mono text-sm">{formatTZS(deletingSale.totalAmount)}</span>
+              </div>
+              <div className="text-[11px] text-rose-700 dark:text-rose-300">
+                Bidhaa zote {deletingSale.items.length} zitarudishwa stoo kiotomatiki, na muamala utaondolewa kwenye rekodi za mapato.
+              </div>
+            </div>
+
+            <div>
+              <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                Sababu ya Kufuta Mauzo Haya:
+              </label>
+              <textarea
+                rows={2}
+                value={deleteReason}
+                onChange={e => setDeleteReason(e.target.value)}
+                placeholder="Mfano: Muuzaji aliweka risiti mara mbili kimakosa..."
+                className="w-full px-3 py-2 text-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-rose-500"
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeletingSale(null)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition"
+              >
+                Ghairi
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteSale}
+                className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold shadow transition flex items-center gap-1.5"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                <span>Futa na Rudisha Stoo</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL: INSPECT RECEIPT & DELETE INDIVIDUAL MISTAKEN ITEMS */}
+      {/* ========================================================================= */}
+      {inspectingSale && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl w-full max-w-lg p-6 space-y-4 max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
+              <div>
+                <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <span>Mchanganuo wa Risiti #{inspectingSale.receiptNumber}</span>
+                  {inspectingSale.status === 'pending_approval' && (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-100 text-amber-800">
+                      Inasubiri Uthibitisho
+                    </span>
+                  )}
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Iliyoingizwa na {inspectingSale.employeeName} • {inspectingSale.date} {inspectingSale.time}
+                </p>
+              </div>
+              <button
+                onClick={() => setInspectingSale(null)}
+                className="p-1 rounded text-slate-400 hover:text-slate-600"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto space-y-3">
+              <div className="text-xs text-slate-500 dark:text-slate-400 font-medium">
+                Ikiwa muuzaji aliweka bidhaa mojawapo kimakosa, unaweza kuifuta bidhaa hiyo pekee hapa chini:
+              </div>
+
+              <div className="divide-y divide-slate-100 dark:divide-slate-800 border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
+                {inspectingSale.items.map((it, idx) => (
+                  <div key={idx} className="p-3 flex items-center justify-between text-xs hover:bg-slate-50 dark:hover:bg-slate-800/40 transition">
+                    <div>
+                      <span className="font-bold text-slate-900 dark:text-white block">
+                        {it.productName}
+                      </span>
+                      <span className="text-slate-500 text-[11px]">
+                        {it.quantity} {it.unit} @ {formatTZS(it.unitPrice)}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      <span className="font-mono font-bold text-slate-900 dark:text-white">
+                        {formatTZS(it.totalPrice)}
+                      </span>
+
+                      {isSuperAdmin && (
+                        <button
+                          onClick={() => handleDeleteLineItem(idx)}
+                          className="p-1.5 rounded-lg bg-rose-50 text-rose-600 hover:bg-rose-100 dark:bg-rose-950/60 dark:text-rose-400 transition"
+                          title="Futa bidhaa hii pekee (Iliwekwa kimakosa)"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl text-xs space-y-1">
+                <div className="flex justify-between text-slate-600 dark:text-slate-300">
+                  <span>Jumla Ndogo:</span>
+                  <span className="font-mono">{formatTZS(inspectingSale.subtotal)}</span>
+                </div>
+                {inspectingSale.discount > 0 && (
+                  <div className="flex justify-between text-emerald-600">
+                    <span>Punguzo:</span>
+                    <span className="font-mono">-{formatTZS(inspectingSale.discount)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between text-sm font-black text-slate-900 dark:text-white pt-1 border-t border-slate-200 dark:border-slate-700">
+                  <span>Jumla Kuu:</span>
+                  <span className="font-mono text-emerald-600 dark:text-emerald-400">
+                    {formatTZS(inspectingSale.totalAmount)}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between pt-2 border-t border-slate-200 dark:border-slate-800">
+              {inspectingSale.status === 'pending_approval' ? (
+                <button
+                  onClick={() => {
+                    approveSale(inspectingSale.id);
+                    setInspectingSale(null);
+                  }}
+                  className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow flex items-center gap-1.5"
+                >
+                  <Check className="h-4 w-4" />
+                  <span>Thibitisha Mauzo Haya</span>
+                </button>
+              ) : (
+                <div />
+              )}
+
+              <button
+                onClick={() => setInspectingSale(null)}
+                className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold hover:bg-slate-200"
+              >
+                Funga
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PRINT REPORT MODAL */}
+      <PrintReportModal
+        isOpen={showPrintModal}
+        onClose={() => setShowPrintModal(false)}
+        initialPeriod={printModalPeriod}
+      />
+
+      {/* GMAIL HUB MODAL */}
+      <GmailHubModal
+        isOpen={showGmailModal}
+        onClose={() => setShowGmailModal(false)}
+      />
     </div>
   );
 };

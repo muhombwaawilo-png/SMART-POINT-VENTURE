@@ -104,6 +104,13 @@ interface StoreContextType {
   }) => Sale;
   
   cancelSale: (saleId: string, reason: string) => boolean;
+  approveSale: (saleId: string) => boolean;
+  rejectSale: (saleId: string, reason?: string) => boolean;
+  deleteSale: (saleId: string, reason?: string) => boolean;
+  deleteSaleItem: (saleId: string, itemIndex: number, reason?: string) => boolean;
+  playSaleChime: () => void;
+  isLiveChimeEnabled: boolean;
+  setIsLiveChimeEnabled: (enabled: boolean) => void;
   
   addProduct: (product: Omit<Product, 'id' | 'status'>) => Product;
   updateProduct: (id: string, updates: Partial<Product>) => void;
@@ -406,6 +413,31 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     return requiredRoles.includes(currentUser.role);
   };
 
+  // Live sale alert chime toggle & sound generator
+  const [isLiveChimeEnabled, setIsLiveChimeEnabled] = useState<boolean>(true);
+
+  const playSaleChime = () => {
+    if (!isLiveChimeEnabled) return;
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(523.25, ctx.currentTime); // C5
+      osc.frequency.exponentialRampToValueAtTime(783.99, ctx.currentTime + 0.12); // G5
+      gain.gain.setValueAtTime(0.2, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.36);
+    } catch {
+      // Audio not permitted or running headlessly
+    }
+  };
+
   // Audit log helper
   const addAuditLog = (action: string, actionSwahili: string, details: string) => {
     const now = new Date();
@@ -488,6 +520,9 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
 
     const grossProfit = saleData.totalAmount - totalCost;
 
+    const isStaff = currentUser.role === 'cashier';
+    const requireApproval = Boolean(storeState.settings.requireAdminSaleApproval && isStaff);
+
     const newSale: Sale = {
       id: `sale-${Date.now()}`,
       receiptNumber: receiptNum,
@@ -513,7 +548,10 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       isCredit: saleData.isCredit,
       creditPaid: saleData.isCredit ? 0 : saleData.totalAmount,
       creditDue: saleData.creditDue,
-      status: 'completed',
+      status: requireApproval ? 'pending_approval' : 'completed',
+      approvalStatus: requireApproval ? 'pending' : 'approved',
+      approvedBy: requireApproval ? undefined : currentUser.name,
+      approvedAt: requireApproval ? undefined : `${dateStr} ${timeStr}`,
       notes: saleData.notes,
     };
 
@@ -602,10 +640,22 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       };
     });
 
+    playSaleChime();
+
+    if (requireApproval) {
+      addNotification(
+        'system',
+        `Mauzo Mapya ya Mfanyakazi (${currentUser.name})`,
+        `Risiti #${receiptNum} ya ${formatTZS(saleData.totalAmount)} inasubiri uthibitisho wako kwenye Dashboard hapo kwa papo!`,
+        'warning',
+        'dashboard'
+      );
+    }
+
     addAuditLog(
       'SALE_COMPLETED',
-      'Mauzo Yamekamilika',
-      `Risiti #${receiptNum} ya thamani ya ${formatTZS(saleData.totalAmount)} imerekodiwa kwa njia ya ${saleData.paymentMethod}.`
+      requireApproval ? 'Mauzo Yameingizwa (Yanasubiri Uthibitisho)' : 'Mauzo Yamekamilika',
+      `Risiti #${receiptNum} ya thamani ya ${formatTZS(saleData.totalAmount)} imerekodiwa kwa njia ya ${saleData.paymentMethod} na ${currentUser.name}.${requireApproval ? ' (Inasubiri uthibitisho wa Super Admin)' : ''}`
     );
 
     return newSale;
@@ -682,6 +732,211 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
       'SALE_CANCELLED',
       'Muamala wa Mauzo Umefutwa',
       `Risiti #${sale.receiptNumber} ya ${formatTZS(sale.totalAmount)} imefutwa na ${currentUser.name}. Sababu: ${reason}. Mzigo umerudishwa stoo.`
+    );
+
+    return true;
+  };
+
+  // 2B. APPROVE SALE (Live confirmation by Super Admin)
+  const approveSale = (saleId: string): boolean => {
+    if (!canAccess(['super_admin', 'manager'])) {
+      alert('Huna mamlaka ya kudhibitisha mauzo haya.');
+      return false;
+    }
+
+    const sale = storeState.sales.find(s => s.id === saleId);
+    if (!sale) return false;
+
+    const now = new Date();
+    const dateStr = now.toISOString().split('T')[0];
+    const timeStr = now.toTimeString().split(' ')[0];
+
+    setStoreState(prev => ({
+      ...prev,
+      sales: prev.sales.map(s => {
+        if (s.id === saleId) {
+          return {
+            ...s,
+            status: 'completed' as const,
+            approvalStatus: 'approved' as const,
+            approvedBy: currentUser.name,
+            approvedAt: `${dateStr} ${timeStr}`,
+          };
+        }
+        return s;
+      }),
+    }));
+
+    playSaleChime();
+
+    addAuditLog(
+      'SALE_APPROVED',
+      'Mauzo Yamethibitishwa Papo kwa Papo',
+      `Super Admin ${currentUser.name} amethibitisha risiti #${sale.receiptNumber} ya ${formatTZS(sale.totalAmount)} iliyoingizwa na ${sale.employeeName}.`
+    );
+
+    return true;
+  };
+
+  // 2C. REJECT SALE
+  const rejectSale = (saleId: string, reason: string = 'Imekataliwa na Super Admin'): boolean => {
+    if (!canAccess(['super_admin', 'manager'])) {
+      alert('Huna mamlaka ya kukataa muamala huu.');
+      return false;
+    }
+    return cancelSale(saleId, reason);
+  };
+
+  // 2D. DELETE SALE (Void & erase mistaken sales entered by cashier)
+  const deleteSale = (saleId: string, reason: string = 'Ilirekodiwa kimakosa na muuzaji'): boolean => {
+    if (!canAccess(['super_admin', 'manager'])) {
+      alert('Huna mamlaka ya kufuta mauzo haya kabisa.');
+      return false;
+    }
+
+    const targetSale = storeState.sales.find(s => s.id === saleId);
+    if (!targetSale) return false;
+
+    setStoreState(prev => {
+      // Restore inventory stock
+      const updatedProducts = [...prev.products];
+      targetSale.items.forEach(item => {
+        const pIndex = updatedProducts.findIndex(p => p.id === item.productId);
+        if (pIndex >= 0) {
+          const prod = updatedProducts[pIndex];
+          const restoredStock = prod.currentStock + item.quantity;
+          let newStatus = prod.status;
+          if (restoredStock > prod.minStockLevel) newStatus = 'active';
+          else if (restoredStock > 0) newStatus = 'low_stock';
+
+          updatedProducts[pIndex] = {
+            ...prod,
+            currentStock: restoredStock,
+            status: newStatus,
+          };
+        }
+      });
+
+      // Restore customer debt if credit
+      let updatedCustomers = prev.customers;
+      if (targetSale.isCredit && targetSale.customerId) {
+        updatedCustomers = prev.customers.map(c => {
+          if (c.id === targetSale.customerId) {
+            return {
+              ...c,
+              totalDebt: Math.max(0, c.totalDebt - targetSale.totalAmount),
+            };
+          }
+          return c;
+        });
+      }
+
+      // Remove sale record completely
+      const updatedSales = prev.sales.filter(s => s.id !== saleId);
+
+      return {
+        ...prev,
+        sales: updatedSales,
+        products: updatedProducts,
+        customers: updatedCustomers,
+      };
+    });
+
+    addAuditLog(
+      'SALE_DELETED_MISTAKE',
+      'Mauzo ya Makosa Yamefutwa Kabisa',
+      `Risiti #${targetSale.receiptNumber} (${formatTZS(targetSale.totalAmount)}) iliyoingizwa na ${targetSale.employeeName} imefutwa kabisa na ${currentUser.name}. Sababu: ${reason}. Bidhaa zimerudishwa stoo.`
+    );
+
+    return true;
+  };
+
+  // 2E. DELETE SALE ITEM (Delete specific line item entered mistakenly in a sale)
+  const deleteSaleItem = (saleId: string, itemIndex: number, reason: string = 'Bidhaa iliwekwa kimakosa na muuzaji'): boolean => {
+    if (!canAccess(['super_admin', 'manager'])) {
+      alert('Huna mamlaka ya kurekebisha risiti hii.');
+      return false;
+    }
+
+    const targetSale = storeState.sales.find(s => s.id === saleId);
+    if (!targetSale || !targetSale.items[itemIndex]) return false;
+
+    // If only one item in sale, delete the entire sale
+    if (targetSale.items.length <= 1) {
+      return deleteSale(saleId, reason);
+    }
+
+    const removedItem = targetSale.items[itemIndex];
+
+    setStoreState(prev => {
+      // 1. Restore product stock for this item
+      const updatedProducts = [...prev.products];
+      const pIndex = updatedProducts.findIndex(p => p.id === removedItem.productId);
+      if (pIndex >= 0) {
+        const prod = updatedProducts[pIndex];
+        const restoredStock = prod.currentStock + removedItem.quantity;
+        let newStatus = prod.status;
+        if (restoredStock > prod.minStockLevel) newStatus = 'active';
+        else if (restoredStock > 0) newStatus = 'low_stock';
+
+        updatedProducts[pIndex] = {
+          ...prod,
+          currentStock: restoredStock,
+          status: newStatus,
+        };
+      }
+
+      // 2. Recompute remaining sale items & totals
+      const remainingItems = targetSale.items.filter((_, idx) => idx !== itemIndex);
+      const newSubtotal = remainingItems.reduce((sum, it) => sum + it.totalPrice, 0);
+      const newTotalCost = remainingItems.reduce((sum, it) => sum + it.totalCost, 0);
+      const newTotalAmount = Math.max(0, newSubtotal - targetSale.discount);
+      const newGrossProfit = newTotalAmount - newTotalCost;
+      const difference = targetSale.totalAmount - newTotalAmount;
+
+      // 3. Update customer debt if credit
+      let updatedCustomers = prev.customers;
+      if (targetSale.isCredit && targetSale.customerId) {
+        updatedCustomers = prev.customers.map(c => {
+          if (c.id === targetSale.customerId) {
+            return {
+              ...c,
+              totalDebt: Math.max(0, c.totalDebt - difference),
+            };
+          }
+          return c;
+        });
+      }
+
+      // 4. Update sale record
+      const updatedSales = prev.sales.map(s => {
+        if (s.id === saleId) {
+          return {
+            ...s,
+            items: remainingItems,
+            subtotal: newSubtotal,
+            totalAmount: newTotalAmount,
+            totalCost: newTotalCost,
+            grossProfit: newGrossProfit,
+            amountReceived: s.paymentMethod === 'cash' ? Math.max(s.amountReceived, newTotalAmount) : newTotalAmount,
+            notes: (s.notes ? s.notes + ' | ' : '') + `Bidhaa "${removedItem.productName}" ilifutwa na Admin: ${reason}`,
+          };
+        }
+        return s;
+      });
+
+      return {
+        ...prev,
+        sales: updatedSales,
+        products: updatedProducts,
+        customers: updatedCustomers,
+      };
+    });
+
+    addAuditLog(
+      'SALE_ITEM_DELETED',
+      'Bidhaa ya Makosa Imefutwa kwenye Risiti',
+      `Bidhaa "${removedItem.productName}" (${removedItem.quantity} ${removedItem.unit}) yenye thamani ya ${formatTZS(removedItem.totalPrice)} imefutwa kwenye Risiti #${targetSale.receiptNumber} na ${currentUser.name}.`
     );
 
     return true;
@@ -1365,6 +1620,13 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         isOnline,
         recordSale,
         cancelSale,
+        approveSale,
+        rejectSale,
+        deleteSale,
+        deleteSaleItem,
+        playSaleChime,
+        isLiveChimeEnabled,
+        setIsLiveChimeEnabled,
         addProduct,
         updateProduct,
         adjustStock,
